@@ -1,0 +1,104 @@
+---
+- name: Installation de la derniere version d'Asterisk
+  hosts: all
+  become: yes
+  vars:
+    asterisk_version: "20.5.2"
+    asterisk_mirror: "https://github.com/asterisk/asterisk/archive/refs/tags/"
+
+  tasks:
+    - name: Mettre a jour et ameliorer les paquets apt
+      apt:
+        update_cache: yes
+        upgrade: yes
+
+    - name: Installation des dependances necessaires
+      apt:
+        name:
+          - build-essential
+          - libxml2-dev
+          - libncurses5-dev
+          - libssl-dev
+          - libsqlite3-dev
+          - uuid-dev
+          - libjansson-dev
+          - wget
+          - curl
+          - pkg-config
+          - libedit-dev
+          - libxslt1-dev
+          - libcurl4-openssl-dev
+          - unixodbc-dev
+        state: present
+
+    - name: Creation du répertoire source d'Asterisk
+      file:
+        path: /usr/src/asterisk
+        state: directory
+
+    - name: Essayer de telecharger Asterisk depuis le miroir GitHub
+      get_url:
+        url: "{{ asterisk_mirror }}{{ asterisk_version }}.tar.gz"
+        dest: "/usr/src/asterisk/asterisk-{{ asterisk_version }}.tar.gz"
+      register: github_download
+      ignore_errors: yes
+
+    - name: Extraire les sources d'Asterisk
+      unarchive:
+        src: "/usr/src/asterisk/asterisk-{{ asterisk_version }}.tar.gz"
+        dest: /usr/src/asterisk
+        remote_src: yes
+      when: not github_download.failed
+
+    - name: Configurer Asterisk
+      command: ./configure --with-pjproject-bundled=no
+      args:
+        chdir: "/usr/src/asterisk/asterisk-{{ asterisk_version }}"
+      when: not github_download.failed
+
+    - name: Compiler Asterisk
+      command: make
+      args:
+        chdir: "/usr/src/asterisk/asterisk-{{ asterisk_version }}"
+      when: not github_download.failed
+
+    - name: Installer Asterisk
+      command: make install
+      args:
+        chdir: "/usr/src/asterisk/asterisk-{{ asterisk_version }}"
+      when: not github_download.failed
+
+    - name: Installer les configurations d'exemple
+      command: make samples
+      args:
+        chdir: "/usr/src/asterisk/asterisk-{{ asterisk_version }}"
+      when: not github_download.failed
+
+    - name: Installer le script d'initialisation
+      command: make config
+      args:
+        chdir: "/usr/src/asterisk/asterisk-{{ asterisk_version }}"
+      when: not github_download.failed
+
+    - name: Creer l'utilisateur et le groupe Asterisk
+      user:
+        name: asterisk
+        system: yes
+        shell: /sbin/nologin
+
+    - name: Mettre a jour le cache ld.so
+      command: ldconfig
+
+    - name: Desactiver le service Asterisk
+      systemd:
+        name: asterisk
+        enabled: no
+        state: stopped
+
+    - name: Verifier l'installation d'Asterisk
+      command: asterisk -V
+      register: asterisk_version_check
+
+    - name: Afficher la version d'Asterisk
+      debug:
+        var: asterisk_version_check.stdout
